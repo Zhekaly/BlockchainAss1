@@ -1,4 +1,6 @@
 import time
+from random import randint
+from math import gcd
 
 def hash(text):
     def right_rotate(value, shift):
@@ -71,87 +73,146 @@ def hash(text):
 
     return sha256(text)
 
+
+class RSA:
+    def __init__(self):
+        self.public_key = None
+        self.private_key = None
+
+    def generate_keys(self):
+        def generate_prime():
+            while True:
+                num = randint(100, 999)
+                if all(num % i != 0 for i in range(2, int(num ** 0.5) + 1)):
+                    return num
+
+        p = generate_prime()
+        q = generate_prime()
+        n = p * q
+        phi = (p - 1) * (q - 1)
+
+        e = randint(2, phi - 1)
+        while gcd(e, phi) != 1:
+            e = randint(2, phi - 1)
+
+        d = pow(e, -1, phi)
+        self.public_key = (e, n)
+        self.private_key = (d, n)
+
+    def encrypt(self, message, key):
+        e, n = key
+        return [pow(ord(char), e, n) for char in message]
+
+    def decrypt(self, cipher, key):
+        d, n = key
+        return ''.join(chr(pow(char, d, n)) for char in cipher)
+
+    def sign(self, private_key, document):
+        return self.encrypt(document, private_key)
+
+    def verify(self, public_key, document, signature):
+        decrypted_doc = self.decrypt(signature, public_key)
+        return decrypted_doc == document
+
+
+class Transaction:
+    def __init__(self, sender, receiver, amount, private_key):
+        self.sender = sender
+        self.receiver = receiver
+        self.amount = amount
+        self.signature = None
+        self.private_key = private_key
+
+    def sign_transaction(self, rsa):
+        document = f"{self.sender}->{self.receiver}:{self.amount}"
+        self.signature = rsa.sign(self.private_key, document)
+
+    def verify_transaction(self, rsa, public_key):
+        document = f"{self.sender}->{self.receiver}:{self.amount}"
+        if not rsa.verify(public_key, document, self.signature):
+            raise ValueError("Signature is wrong")
+        if f"{self.sender}->{self.receiver}:{self.amount}" != document:
+            raise ValueError("Document is wrong")
+
+
 class Block:
     def __init__(self, previous_hash, timestamp, merkle_root):
         self.previous_hash = previous_hash
         self.timestamp = timestamp
         self.merkle_root = merkle_root
-        self.hash = self.calculate_hash()
+        self.nonce = 0
+        self.hash = None
 
     def calculate_hash(self):
-        return hash(self.previous_hash + str(self.timestamp) + self.merkle_root)
+        return hash(self.previous_hash + str(self.timestamp) + self.merkle_root + str(self.nonce))
 
     def display_block(self):
         print(f"Block Hash: {self.hash}")
         print(f"Merkle Root: {self.merkle_root}")
         print(f"Previous Hash: {self.previous_hash}")
         print(f"Timestamp: {self.timestamp}")
+        print(f"Nonce: {self.nonce}")
         print("---------------")
+
+
 class MerkleTree:
     def __init__(self, transactions):
         self.transactions = transactions
 
     def build_tree(self):
-        print("Adding transactions.")
         hashes = [hash(transaction) for transaction in self.transactions]
         while len(hashes) > 1:
             if len(hashes) % 2 != 0:
                 hashes.append(hashes[-1])
-            hashes = [hash(hashes[i] + hashes[i+1]) for i in range(0, len(hashes), 2)]
+            hashes = [hash(hashes[i] + hashes[i + 1]) for i in range(0, len(hashes), 2)]
         return hashes[0]
 
 
-def mine_block(block):
-    print("Mining a block.")
-    nonce = 0
-    while True:
-        block_hash = hash(block.previous_hash + str(block.timestamp) + block.merkle_root + str(nonce))
-        if block_hash[:4] == "0000":
-            block.hash = block_hash
-            break
-        nonce += 1
+class Blockchain:
+    def __init__(self):
+        self.chain = []
+        self.transactions = []
+        self.wallet = None
+        self.difficulty = 4
+
+    def add_transaction(self, transaction):
+        self.transactions.append(transaction)
+
+    def mine_block(self, rsa):
+        timestamp = int(time.time())
+        merkle_tree = MerkleTree([f"{t.sender}->{t.receiver}:{t.amount}" for t in self.transactions])
+        merkle_root = merkle_tree.build_tree()
+        previous_hash = self.chain[-1].hash if self.chain else "0"
+        block = Block(previous_hash, timestamp, merkle_root)
+
+        while True:
+            block_hash = block.calculate_hash()
+            if block_hash[:self.difficulty] == "0000":
+                block.hash = block_hash
+                break
+            block.nonce += 1
+
+        self.chain.append(block)
+        return block
 
 
-def validate_blockchain(blockchain):
-    print("Validating the blockchain.")
-    for i in range(1, len(blockchain)):
-        if blockchain[i].previous_hash != blockchain[i-1].hash:
-            return False
-    return True
+rsa = RSA()
+rsa.generate_keys()
+
+blockchain = Blockchain()
+
+transaction1 = Transaction("Alice", "Bob", 10, rsa.private_key)
+transaction1.sign_transaction(rsa)
+blockchain.add_transaction(transaction1)
+
+mined_block1 = blockchain.mine_block(rsa)
+mined_block1.display_block()
+
+transaction2 = Transaction("Charlie", "Dave", 20, rsa.private_key)
+transaction2.sign_transaction(rsa)
+blockchain.add_transaction(transaction2)
+
+mined_block2 = blockchain.mine_block(rsa)
+mined_block2.display_block()
 
 
-transactions = [
-    "Alice -> Bob: 10",
-    "Bob -> Charlie: 5",
-    "Charlie -> Dave: 2",
-    "Dave -> Alice: 1",
-    "Alice -> Eve: 20",
-    "Eve -> Bob: 15",
-    "Bob -> Alice: 30",
-    "Charlie -> Dave: 5",
-    "Dave -> Bob: 10",
-    "Alice -> Charlie: 25"
-]
-
-
-merkle_tree = MerkleTree(transactions)
-merkle_root = merkle_tree.build_tree()
-
-blocks = []
-genesis_block = Block("0", time.time(), merkle_root)
-blocks.append(genesis_block)
-
-mine_block(genesis_block)
-
-new_block = Block(genesis_block.hash, time.time(), merkle_root)
-blocks.append(new_block)
-
-mine_block(new_block)
-
-is_valid = validate_blockchain(blocks)
-print("Blockchain is valid:", is_valid)
-
-print("\nBlockchain contents:")
-for i, block in enumerate(blocks):
-    print(f"Block {i+1}:")
-    block.display_block()
