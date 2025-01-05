@@ -1,4 +1,5 @@
 import time
+import json
 from random import randint
 from math import gcd
 
@@ -177,7 +178,21 @@ class Blockchain:
 
     def add_transaction(self, transaction):
         self.transactions.append(transaction)
+        # Записываем транзакцию в файл после её добавления
+        self.record_transaction(transaction)
 
+    def record_transaction(self, transaction):
+        # Строка с данными транзакции
+        transaction_data = {
+            "sender": transaction.sender,
+            "receiver": transaction.receiver,
+            "amount": transaction.amount,
+            "signature": ''.join([str(x) for x in transaction.signature])  # Преобразуем подпись в строку
+        }
+
+        # Открываем файл для добавления новых транзакций
+        with open("transaction.txt", "a") as file:
+            file.write(json.dumps(transaction_data) + "\n")
     def mine_block(self, rsa):
         timestamp = int(time.time())
         merkle_tree = MerkleTree([f"{t.sender}->{t.receiver}:{t.amount}" for t in self.transactions])
